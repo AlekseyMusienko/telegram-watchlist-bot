@@ -6,7 +6,7 @@ export class UserService {
   async findOrCreate(chatId: number): Promise<User> {
     let user = await UserModel.findOne({ chatId }).exec();
     if (!user) {
-      user = new UserModel({ chatId, movies: [], series: [], shows: [] });
+      user = new UserModel({ chatId, movies: [], series: [], shows: [], state: null });
       await user.save();
     }
     return user;
@@ -70,5 +70,11 @@ export class UserService {
       await media.save();
     }
     return media;
+  }
+
+  async setState(chatId: number, state: string | null): Promise<User> {
+    const user = await this.findOrCreate(chatId);
+    user.state = state;
+    return user.save();
   }
 }

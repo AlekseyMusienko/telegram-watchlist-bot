@@ -32,7 +32,29 @@ app.post(`/bot${token}`, async (req, res) => {
     const chatId = update.message.chat.id;
     const text = update.message.text;
 
-    if (text === '/help') {
+    // Проверяем состояние пользователя
+    const user = await userService.findOrCreate(chatId);
+    if (user.state === 'search_pending') {
+      const query = text.trim();
+      if (query) {
+        const results = await mediaService.searchTmdb(query, tmdbApiKey);
+        const buttons = await Promise.all(
+          results.slice(0, 3).map(async (r: any) => {
+            const mediaType = await mediaService.determineMediaType(r.id, r.media_type, tmdbApiKey);
+            return [{ text: `Добавить: ${r.title}`, callback_data: `add_${mediaType}_${r.id}_${r.title}` }];
+          })
+        );
+        const resultText = results.length
+          ? results.slice(0, 3).map((r: any) => `${r.title} (${r.release_date || r.first_air_date || 'N/A'})`).join('\n')
+          : 'Ничего не найдено';
+        await bot.sendMessage(chatId, `Результаты поиска:\n${resultText}`, {
+          reply_markup: { inline_keyboard: buttons },
+        });
+        await userService.setState(chatId, null); // Сбрасываем состояние
+      } else {
+        await bot.sendMessage(chatId, 'Пожалуйста, укажите запрос для поиска');
+      }
+    } else if (text === '/help') {
       await bot.sendMessage(chatId, 'Добро пожаловать в Сериальщик! Выберите действие:', {
         reply_markup: {
           inline_keyboard: [
@@ -43,7 +65,6 @@ app.post(`/bot${token}`, async (req, res) => {
         },
       });
     } else if (text === '/listmovies') {
-      const user = await userService.findOrCreate(chatId);
       const movies = await UserModel.findOne({ chatId }).populate('movies').exec();
       const movieList = movies?.movies.length ? movies.movies.map((m: any) => `${m.title} (ID: ${m._id})`).join('\n') : 'Фильмы не найдены';
       const buttons = movies?.movies.length
@@ -57,7 +78,6 @@ app.post(`/bot${token}`, async (req, res) => {
         reply_markup: { inline_keyboard: buttons },
       });
     } else if (text === '/listseries') {
-      const user = await userService.findOrCreate(chatId);
       const series = await UserModel.findOne({ chatId }).populate('series').exec();
       const seriesList = series?.series.length ? series.series.map((s: any) => `${s.title} (ID: ${s._id})`).join('\n') : 'Сериалы не найдены';
       const buttons = series?.series.length
@@ -72,7 +92,6 @@ app.post(`/bot${token}`, async (req, res) => {
         reply_markup: { inline_keyboard: buttons },
       });
     } else if (text === '/listshows') {
-      const user = await userService.findOrCreate(chatId);
       const shows = await UserModel.findOne({ chatId }).populate('shows').exec();
       const showList = shows?.shows.length ? shows.shows.map((s: any) => `${s.title} (ID: ${s._id})`).join('\n') : 'Шоу не найдены';
       const buttons = shows?.shows.length
@@ -86,37 +105,18 @@ app.post(`/bot${token}`, async (req, res) => {
       await bot.sendMessage(chatId, `Шоу:\n${showList}`, {
         reply_markup: { inline_keyboard: buttons },
       });
-    } else if (text.startsWith('/search ')) {
-      const query = text.replace('/search ', '').trim();
-      if (query) {
-        const results = await mediaService.searchTmdb(query, tmdbApiKey);
-        const buttons = results.slice(0, 3).map((r: any) => [
-          { text: `🎬 ${r.title} (Фильм)`, callback_data: `add_movie_${r.id}_${r.title}` },
-          { text: `📺 ${r.title} (Сериал)`, callback_data: `add_series_${r.id}_${r.title}` },
-          { text: `🎥 ${r.title} (Шоу)`, callback_data: `add_show_${r.id}_${r.title}` },
-        ]);
-        const resultText = results.length
-          ? results.slice(0, 3).map((r: any) => `${r.title} (${r.release_date || r.first_air_date || 'N/A'})`).join('\n')
-          : 'Ничего не найдено';
-        await bot.sendMessage(chatId, `Результаты поиска:\n${resultText}`, {
-          reply_markup: { inline_keyboard: buttons },
-        });
-      } else {
-        await bot.sendMessage(chatId, 'Укажите запрос для поиска (например, /search Матрица)');
-      }
     } else if (text === '/recommend') {
       const user = await userService.findOrCreate(chatId);
       const recommendations = await mediaService.recommend(chatId, tmdbApiKey, user);
+      const buttons = await Promise.all(
+        recommendations.slice(0, 3).map(async (r: any) => {
+          const mediaType = await mediaService.determineMediaType(r.id, r.media_type || 'movie', tmdbApiKey);
+          return [{ text: `Добавить: ${r.title}`, callback_data: `add_${mediaType}_${r.id}_${r.title}` }];
+        })
+      );
       const resultText = recommendations.length
         ? recommendations.map((r: any) => `${r.title} (${r.release_date || r.first_air_date || 'N/A'})`).join('\n')
         : 'Рекомендации недоступны. Добавьте медиа!';
-      const buttons = recommendations.length
-        ? recommendations.slice(0, 3).map((r: any) => [
-            { text: `Добавить: ${r.title} (Фильм)`, callback_data: `add_movie_${r.id}_${r.title}` },
-            { text: `Добавить: ${r.title} (Сериал)`, callback_data: `add_series_${r.id}_${r.title}` },
-            { text: `Добавить: ${r.title} (Шоу)`, callback_data: `add_show_${r.id}_${r.title}` },
-          ])
-        : [];
       await bot.sendMessage(chatId, `Рекомендации:\n${resultText}`, {
         reply_markup: { inline_keyboard: buttons },
       });
@@ -218,7 +218,8 @@ app.post(`/bot${token}`, async (req, res) => {
     const type = parts[1];
 
     if (action === 'search') {
-      await bot.sendMessage(chatId, 'Введите запрос для поиска (например, /search Матрица)');
+      await userService.setState(chatId, 'search_pending');
+      await bot.sendMessage(chatId, 'Введите название фильма, сериала или шоу:');
     } else if (action === 'list' && type === 'movies') {
       const movies = await UserModel.findOne({ chatId }).populate('movies').exec();
       const movieList = movies?.movies.length ? movies.movies.map((m: any) => `${m.title} (ID: ${m._id})`).join('\n') : 'Фильмы не найдены';
@@ -263,16 +264,15 @@ app.post(`/bot${token}`, async (req, res) => {
     } else if (action === 'recommend') {
       const user = await userService.findOrCreate(chatId);
       const recommendations = await mediaService.recommend(chatId, tmdbApiKey, user);
+      const buttons = await Promise.all(
+        recommendations.slice(0, 3).map(async (r: any) => {
+          const mediaType = await mediaService.determineMediaType(r.id, r.media_type || 'movie', tmdbApiKey);
+          return [{ text: `Добавить: ${r.title}`, callback_data: `add_${mediaType}_${r.id}_${r.title}` }];
+        })
+      );
       const resultText = recommendations.length
         ? recommendations.map((r: any) => `${r.title} (${r.release_date || r.first_air_date || 'N/A'})`).join('\n')
         : 'Рекомендации недоступны. Добавьте медиа!';
-      const buttons = recommendations.length
-        ? recommendations.slice(0, 3).map((r: any) => [
-            { text: `Добавить: ${r.title} (Фильм)`, callback_data: `add_movie_${r.id}_${r.title}` },
-            { text: `Добавить: ${r.title} (Сериал)`, callback_data: `add_series_${r.id}_${r.title}` },
-            { text: `Добавить: ${r.title} (Шоу)`, callback_data: `add_show_${r.id}_${r.title}` },
-          ])
-        : [];
       await bot.sendMessage(chatId, `Рекомендации:\n${resultText}`, {
         reply_markup: { inline_keyboard: buttons },
       });
