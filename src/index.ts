@@ -37,18 +37,18 @@ app.post(`/bot${token}`, async (req, res) => {
     } else if (text === '/listmovies') {
       const user = await userService.findOrCreate(chatId);
       const movies = await UserModel.findOne({ chatId }).populate('movies').exec();
-      const movieList = movies?.movies.length ? movies.movies.map((m: any) => m.title).join(', ') : 'No movies found';
-      await bot.sendMessage(chatId, `Movies: ${movieList}`);
+      const movieList = movies?.movies.length ? movies.movies.map((m: any) => `${m.title} (ID: ${m._id})`).join('\n') : 'No movies found';
+      await bot.sendMessage(chatId, `Movies:\n${movieList}`);
     } else if (text === '/listseries') {
       const user = await userService.findOrCreate(chatId);
       const series = await UserModel.findOne({ chatId }).populate('series').exec();
-      const seriesList = series?.series.length ? series.series.map((s: any) => s.title).join(', ') : 'No series found';
-      await bot.sendMessage(chatId, `Series: ${seriesList}`);
+      const seriesList = series?.series.length ? series.series.map((s: any) => `${s.title} (ID: ${s._id})`).join('\n') : 'No series found';
+      await bot.sendMessage(chatId, `Series:\n${seriesList}`);
     } else if (text === '/listshows') {
       const user = await userService.findOrCreate(chatId);
       const shows = await UserModel.findOne({ chatId }).populate('shows').exec();
-      const showList = shows?.shows.length ? shows.shows.map((s: any) => s.title).join(', ') : 'No shows found';
-      await bot.sendMessage(chatId, `Shows: ${showList}`);
+      const showList = shows?.shows.length ? shows.shows.map((s: any) => `${s.title} (ID: ${s._id})`).join('\n') : 'No shows found';
+      await bot.sendMessage(chatId, `Shows:\n${showList}`);
     } else if (text.startsWith('/search ')) {
       const query = text.replace('/search ', '').trim();
       if (query) {
@@ -59,20 +59,20 @@ app.post(`/bot${token}`, async (req, res) => {
           { text: `🎥 ${r.title} (Show)`, callback_data: `add_show_${r.id}_${r.title}` },
         ]);
         const resultText = results.length
-          ? results.slice(0, 3).map((r: any) => `${r.title} (${r.release_date || r.first_air_date})`).join('\n')
+          ? results.slice(0, 3).map((r: any) => `${r.title} (${r.release_date || r.first_air_date || 'N/A'})`).join('\n')
           : 'No results found';
         await bot.sendMessage(chatId, `Search results:\n${resultText}`, {
           reply_markup: { inline_keyboard: buttons },
         });
       } else {
-        await bot.sendMessage(chatId, 'Please provide a search query');
+        await bot.sendMessage(chatId, 'Please provide a search query (e.g., /search The Matrix)');
       }
     } else if (text === '/recommend') {
       const user = await userService.findOrCreate(chatId);
       const recommendations = await mediaService.recommend(chatId, tmdbApiKey, user);
       const resultText = recommendations.length
-        ? recommendations.map((r: any) => `${r.title} (${r.release_date || r.first_air_date})`).join('\n')
-        : 'No recommendations available';
+        ? recommendations.map((r: any) => `${r.title} (${r.release_date || r.first_air_date || 'N/A'})`).join('\n')
+        : 'No recommendations available. Add some media first!';
       await bot.sendMessage(chatId, `Recommendations:\n${resultText}`);
     } else if (text.startsWith('/remind ')) {
       const parts = text.replace('/remind ', '').split(' ');
@@ -108,8 +108,14 @@ app.post(`/bot${token}`, async (req, res) => {
       }
     } else if (text.startsWith('/watchingnow ')) {
       const mediaId = text.replace('/watchingnow ', '').trim();
-      const media = await userService.markWatchingNow(chatId, mediaId);
-      await bot.sendMessage(chatId, media ? `Now watching: ${media.title}` : 'Media not found');
+      if (mediaId) {
+        const media = await userService.markWatchingNow(chatId, mediaId);
+        await bot.sendMessage(chatId, media ? `Now watching: ${media.title}` : 'Media not found');
+      } else {
+        await bot.sendMessage(chatId, 'Usage: /watchingnow <id>');
+      }
+    } else if (text === '/watchingnow') {
+      await bot.sendMessage(chatId, 'Please provide a media ID (e.g., /watchingnow <id>)');
     }
   } else if (update.callback_query) {
     const chatId = update.callback_query.message.chat.id;
@@ -119,7 +125,7 @@ app.post(`/bot${token}`, async (req, res) => {
     if (action === 'add') {
       const media = await mediaService.addMedia(parseInt(tmdbId), type as 'movie' | 'series' | 'show', title);
       await userService.addToList(chatId, media);
-      await bot.sendMessage(chatId, `Added ${type}: ${title}`, {
+      await bot.sendMessage(chatId, `Added ${type}: ${title} (ID: ${media._id})`, {
         reply_markup: {
           inline_keyboard: [
             [{ text: 'Mark as watched', callback_data: `mark_watched_${media._id}` }],
