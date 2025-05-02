@@ -47,7 +47,13 @@ export class UserService {
 
   async markEpisode(chatId: number, mediaId: string, season: number, episode: number): Promise<Media | null> {
     const media = await MediaModel.findById(mediaId).exec();
-    if (media && (media.type === 'series' || media.type === 'show')) {
+    if (!media) {
+      return null;
+    }
+    if (media.type === 'movie') {
+      throw new Error('Эпизоды нельзя отмечать для фильмов');
+    }
+    if (media.type === 'series' || media.type === 'show') {
       media.watchedEpisodes = media.watchedEpisodes || [];
       if (!media.watchedEpisodes.some((e: { season: number; episode: number }) => e.season === season && e.episode === episode)) {
         media.watchedEpisodes.push({ season, episode });
