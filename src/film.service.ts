@@ -11,6 +11,10 @@ export class FilmService {
     return film.save();
   }
 
+  async deleteFilm(title: string): Promise<Film | null> {
+    return FilmModel.findOneAndDelete({ title }).exec();
+  }
+
   async searchTmdb(query: string, apiKey: string): Promise<any> {
     const response = await axios.get('https://api.themoviedb.org/3/search/movie', {
       params: { api_key: apiKey, query },
@@ -19,15 +23,13 @@ export class FilmService {
   }
 
   async startReleaseCheck(bot: any, apiKey: string) {
-    // Пример периодической проверки (можно настроить позже)
     setInterval(async () => {
       const films = await this.findAll();
       for (const film of films) {
         if (film.tmdbId) {
-          // Проверка новых релизов (упрощённо)
           console.log(`Checking releases for ${film.title}`);
         }
       }
-    }, 24 * 60 * 60 * 1000); // Раз в день
+    }, 24 * 60 * 60 * 1000);
   }
 }
