@@ -33,7 +33,7 @@ app.post(`/bot${token}`, async (req, res) => {
     const text = update.message.text;
 
     if (text === '/help') {
-      await bot.sendMessage(chatId, 'Команды: /help, /listmovies, /listseries, /listshows, /search <запрос>, /recommend, /remind <id> <дни>, /markwatched <id>, /markepisode <id> <сезон> <эпизод>, /watchingnow <id>', {
+      await bot.sendMessage(chatId, 'Добро пожаловать в Сериальщик! Выберите действие:', {
         reply_markup: {
           inline_keyboard: [
             [{ text: 'Поиск медиа', callback_data: 'search' }],
