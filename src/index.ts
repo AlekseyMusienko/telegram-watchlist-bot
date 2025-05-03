@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import mongoose from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
 import request from 'request-promise';
 import TelegramBot from 'node-telegram-bot-api';
 
@@ -7,15 +7,33 @@ const app = express();
 app.use(express.json());
 
 // Конфигурация
-const TOKEN: string = '7583335421:AAEOHXw9RSntZWC1ER867nijCKynAOiNrDU';
-const WEBHOOK_URL: string = `https://telegram-watchlist-bot.onrender.com/bot${TOKEN}`;
+const TOKEN: string = process.env.TELEGRAM_BOT_TOKEN || '7583335421:AAEOHXw9RSntZWC1ER867nijCKynAOiNrDU';
+const WEBHOOK_URL: string = `${process.env.RENDER_EXTERNAL_HOSTNAME || 'https://telegram-watchlist-bot.onrender.com'}/bot${TOKEN}`;
 const PORT: number = process.env.PORT ? parseInt(process.env.PORT) : 10000;
-const MONGODB_URI: string = process.env.MONGODB_URI || 'mongodb://localhost:27017/watchlist';
+const MONGO_URI: string = process.env.MONGO_URI || 'mongodb://localhost:27017/watchlist';
+const TMDB_API_KEY: string = process.env.TMDB_API_KEY || 'dbcb8e081cd5251282612d9e22ab1852';
 
 // Подключение к MongoDB
-mongoose.connect(MONGODB_URI)
+mongoose.connect(MONGO_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch((err: Error) => console.error('MongoDB connection error:', err));
+
+// Модель для фильмов/сериалов
+interface IMedia extends Document {
+  userId: number;
+  title: string;
+  type: 'movie' | 'tv';
+  tmdbId: number;
+}
+
+const MediaSchema: Schema = new Schema({
+  userId: { type: Number, required: true },
+  title: { type: String, required: true },
+  type: { type: String, enum: ['movie', 'tv'], required: true },
+  tmdbId: { type: Number, required: true },
+});
+
+const Media = mongoose.model<IMedia>('Media', MediaSchema);
 
 // Функция для отправки сообщений
 async function sendMessage(chatId: number, text: string, replyMarkup: any = null): Promise<any> {
@@ -34,17 +52,121 @@ async function sendMessage(chatId: number, text: string, replyMarkup: any = null
   }
 }
 
+// Функция поиска через TMDB API
+async function searchTMDB(query: string, type: 'movie' | 'tv'): Promise<any[]> {
+  try {
+    const response = await request({
+      method: 'GET',
+      url: `https://api.themoviedb.org/3/search/${type}`,
+      qs: { api_key: TMDB_API_KEY, query, language: 'ru-RU' },
+      json: true,
+    });
+    return response.results || [];
+  } catch (error: any) {
+    console.error('TMDB search error:', error.message);
+    return [];
+  }
+}
+
 // Настройка вебхука
 app.post(`/bot${TOKEN}`, async (req: Request, res: Response) => {
   console.log('Received update:', req.body);
 
-  // Пример обработки входящего сообщения
+  // Обработка сообщения
   if (req.body.message) {
     const chatId: number = req.body.message.chat.id;
-    const text: string = req.body.message.text;
+    const text: string = req.body.message.text.toLowerCase();
 
-    // Пример ответа
-    await sendMessage(chatId, `Получено: ${text}`);
+    if (text === '/start' || text === '/help') {
+      const replyMarkup = {
+        inline_keyboard: [
+          [
+            { text: 'Поиск', callback_data: 'search' },
+            { text: 'Список фильмов', callback_data: 'list_movies' },
+            { text: 'Список сериалов', callback_data: 'list_series' },
+          ],
+          [
+            { text: 'Случайный', callback_data: 'random' },
+            { text: 'Удалить фильм/сериал', callback_data: 'delete' },
+          ],
+        ],
+      };
+      await sendMessage(chatId, 'Добро пожаловать в Сериальщик! Выберите действие:', replyMarkup);
+    } else {
+      // Поиск фильма/сериала
+      const movies = await searchTMDB(text, 'movie');
+      const series = await searchTMDB(text, 'tv');
+      const results = [...movies, ...series];
+
+      if (results.length === 0) {
+        await sendMessage(chatId, 'Ничего не найдено');
+      } else {
+        const replyMarkup = {
+          inline_keyboard: results.slice(0, 5).map((item) => [
+            {
+              text: `${item.title || item.name} (${item.media_type || item.first_air_date ? 'сериал' : 'фильм'})`,
+              callback_data: `add_${item.media_type || (item.first_air_date ? 'tv' : 'movie')}_${item.id}`,
+            },
+          ]),
+        };
+        await sendMessage(chatId, 'Результаты поиска:', replyMarkup);
+      }
+    }
+  }
+
+  // Обработка callback-запросов
+  if (req.body.callback_query) {
+    const chatId: number = req.body.callback_query.message.chat.id;
+    const data: string = req.body.callback_query.data;
+
+    if (data === 'search') {
+      await sendMessage(chatId, 'Введите название фильма или сериала для поиска:');
+    } else if (data === 'list_movies') {
+      const movies = await Media.find({ userId: chatId, type: 'movie' });
+      const text = movies.length > 0 ? movies.map((m) => m.title).join('\n') : 'Список фильмов пуст';
+      await sendMessage(chatId, `Ваши фильмы:\n${text}`);
+    } else if (data === 'list_series') {
+      const series = await Media.find({ userId: chatId, type: 'tv' });
+      const text = series.length > 0 ? series.map((s) => s.title).join('\n') : 'Список сериалов пуст';
+      await sendMessage(chatId, `Ваши сериалы:\n${text}`);
+    } else if (data === 'random') {
+      const media = await Media.find({ userId: chatId });
+      if (media.length > 0) {
+        const randomMedia = media[Math.floor(Math.random() * media.length)];
+        await sendMessage(chatId, `Случайный: ${randomMedia.title} (${randomMedia.type === 'movie' ? 'фильм' : 'сериал'})`);
+      } else {
+        await sendMessage(chatId, 'Ваш список пуст');
+      }
+    } else if (data === 'delete') {
+      const media = await Media.find({ userId: chatId });
+      if (media.length === 0) {
+        await sendMessage(chatId, 'Ваш список пуст');
+      } else {
+        const replyMarkup = {
+          inline_keyboard: media.map((item) => [
+            {
+              text: `${item.title} (${item.type === 'movie' ? 'фильм' : 'сериал'})`,
+              callback_data: `delete_${item._id}`,
+            },
+          ]),
+        };
+        await sendMessage(chatId, 'Выберите фильм/сериал для удаления:', replyMarkup);
+      }
+    } else if (data.startsWith('add_')) {
+      const [, type, tmdbId] = data.split('_');
+      const media = type === 'movie' ? await searchTMDB(tmdbId, 'movie') : await searchTMDB(tmdbId, 'tv');
+      if (media.length > 0) {
+        const title = media[0].title || media[0].name;
+        await Media.create({ userId: chatId, title, type, tmdbId: parseInt(tmdbId) });
+        await sendMessage(chatId, `Добавлено: ${title} (${type === 'movie' ? 'фильм' : 'сериал'})`);
+      }
+    } else if (data.startsWith('delete_')) {
+      const [, id] = data.split('_');
+      const media = await Media.findByIdAndDelete(id);
+      if (media) {
+        await sendMessage(chatId, `Удалено: ${media.title} (${media.type === 'movie' ? 'фильм' : 'сериал'})`);
+      }
+    }
   }
 
   res.status(200).send('OK');
