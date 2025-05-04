@@ -38,10 +38,17 @@ const Media = mongoose.model<IMedia>('Media', MediaSchema);
 // Функция для отправки сообщений
 async function sendMessage(chatId: number, text: string, replyMarkup: any = null): Promise<any> {
   try {
+    const body: any = { chat_id: chatId, text };
+    if (replyMarkup) {
+      body.reply_markup = JSON.parse(JSON.stringify(replyMarkup));
+    }
+    console.log('Sending message with body:', body);
+
     const response = await request({
       method: 'POST',
       url: `https://api.telegram.org/bot${TOKEN}/sendMessage`,
-      form: { chat_id: chatId, text, reply_markup: replyMarkup },
+      body,
+      json: true,
       resolveWithFullResponse: true,
     });
     console.log('SendMessage response:', response.body);
@@ -72,7 +79,7 @@ async function searchTMDB(query: string, type: 'movie' | 'tv'): Promise<any[]> {
 app.post(`/bot${TOKEN}`, async (req: Request, res: Response) => {
   console.log('Received update:', req.body);
 
-  // Обработка сообщения
+  //REFERENCE CODE: Обработка сообщения
   if (req.body.message) {
     const chatId: number = req.body.message.chat.id;
     const text: string = req.body.message.text.toLowerCase();
@@ -114,7 +121,7 @@ app.post(`/bot${TOKEN}`, async (req: Request, res: Response) => {
     }
   }
 
-  // Обработка callback-запросов
+  //REFERENCE CODE: Обработка callback-запросов
   if (req.body.callback_query) {
     const chatId: number = req.body.callback_query.message.chat.id;
     const data: string = req.body.callback_query.data;
