@@ -59,7 +59,7 @@ async function sendMessage(chatId: number, text: string, replyMarkup: any = null
   }
 }
 
-// Функция поиска через TMDB API
+// Функция поиска через TMDB API (по названию)
 async function searchTMDB(query: string, type: 'movie' | 'tv'): Promise<any[]> {
   try {
     const response = await request({
@@ -68,6 +68,7 @@ async function searchTMDB(query: string, type: 'movie' | 'tv'): Promise<any[]> {
       qs: { api_key: TMDB_API_KEY, query, language: 'ru-RU' },
       json: true,
     });
+    console.log(`TMDB search results for ${query} (${type}):`, response.results);
     return response.results || [];
   } catch (error: any) {
     console.error('TMDB search error:', error.message);
@@ -75,11 +76,28 @@ async function searchTMDB(query: string, type: 'movie' | 'tv'): Promise<any[]> {
   }
 }
 
+// Функция получения данных по TMDB ID
+async function getTMDBById(id: string, type: 'movie' | 'tv'): Promise<any> {
+  try {
+    const response = await request({
+      method: 'GET',
+      url: `https://api.themoviedb.org/3/${type}/${id}`,
+      qs: { api_key: TMDB_API_KEY, language: 'ru-RU' },
+      json: true,
+    });
+    console.log(`TMDB data for ${type} ID ${id}:`, response);
+    return response;
+  } catch (error: any) {
+    console.error('TMDB get by ID error:', error.message);
+    return null;
+  }
+}
+
 // Настройка вебхука
 app.post(`/bot${TOKEN}`, async (req: Request, res: Response) => {
   console.log('Received update:', req.body);
 
-  //REFERENCE CODE: Обработка сообщения
+  // Обработка сообщения
   if (req.body.message) {
     const chatId: number = req.body.message.chat.id;
     const text: string = req.body.message.text.toLowerCase();
@@ -121,7 +139,7 @@ app.post(`/bot${TOKEN}`, async (req: Request, res: Response) => {
     }
   }
 
-  //REFERENCE CODE: Обработка callback-запросов
+  // Обработка callback-запросов
   if (req.body.callback_query) {
     const chatId: number = req.body.callback_query.message.chat.id;
     const data: string = req.body.callback_query.data;
@@ -161,11 +179,13 @@ app.post(`/bot${TOKEN}`, async (req: Request, res: Response) => {
       }
     } else if (data.startsWith('add_')) {
       const [, type, tmdbId] = data.split('_');
-      const media = type === 'movie' ? await searchTMDB(tmdbId, 'movie') : await searchTMDB(tmdbId, 'tv');
-      if (media.length > 0) {
-        const title = media[0].title || media[0].name;
+      const media = await getTMDBById(tmdbId, type as 'movie' | 'tv');
+      if (media) {
+        const title = media.title || media.name;
         await Media.create({ userId: chatId, title, type, tmdbId: parseInt(tmdbId) });
         await sendMessage(chatId, `Добавлено: ${title} (${type === 'movie' ? 'фильм' : 'сериал'})`);
+      } else {
+        await sendMessage(chatId, 'Не удалось добавить фильм/сериал. Попробуйте снова.');
       }
     } else if (data.startsWith('delete_')) {
       const [, id] = data.split('_');
