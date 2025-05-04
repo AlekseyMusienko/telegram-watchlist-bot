@@ -78,16 +78,19 @@ async function sendMessage(chatId: number, text: string, replyMarkup: any = null
 // Функция поиска через TMDB API (по названию)
 async function searchTMDB(query: string, type: 'movie' | 'tv'): Promise<any[]> {
   try {
+    console.log(`Searching TMDB: query=${query}, type=${type}, api_key=${TMDB_API_KEY}, language=ru-RU`);
     const response = await request({
       method: 'GET',
       url: `https://api.themoviedb.org/3/search/${type}`,
       qs: { api_key: TMDB_API_KEY, query, language: 'ru-RU' },
       json: true,
     });
-    console.log(`TMDB search results for ${query} (${type}):`, response.results);
-    return response.results || [];
+    console.log(`TMDB response for ${type}:`, response);
+    const results = response.results || [];
+    console.log(`TMDB results for ${type}:`, results);
+    return results;
   } catch (error: any) {
-    console.error('TMDB search error:', error.message);
+    console.error(`TMDB search error for ${type}:`, error.message);
     return [];
   }
 }
@@ -95,6 +98,7 @@ async function searchTMDB(query: string, type: 'movie' | 'tv'): Promise<any[]> {
 // Функция получения данных по TMDB ID
 async function getTMDBById(id: string, type: 'movie' | 'tv'): Promise<any> {
   try {
+    console.log(`Fetching TMDB by ID: id=${id}, type=${type}`);
     const response = await request({
       method: 'GET',
       url: `https://api.themoviedb.org/3/${type}/${id}`,
@@ -112,6 +116,7 @@ async function getTMDBById(id: string, type: 'movie' | 'tv'): Promise<any> {
 // Функция получения трейлера
 async function getTMDBTrailer(id: string, type: 'movie' | 'tv'): Promise<string | null> {
   try {
+    console.log(`Fetching TMDB trailer: id=${id}, type=${type}`);
     const response = await request({
       method: 'GET',
       url: `https://api.themoviedb.org/3/${type}/${id}/videos`,
@@ -119,6 +124,7 @@ async function getTMDBTrailer(id: string, type: 'movie' | 'tv'): Promise<string 
       json: true,
     });
     const trailer = response.results.find((video: any) => video.type === 'Trailer' && video.site === 'YouTube');
+    console.log(`TMDB trailer for ${type} ID ${id}:`, trailer);
     return trailer ? `https://www.youtube.com/watch?v=${trailer.key}` : null;
   } catch (error: any) {
     console.error('TMDB trailer error:', error.message);
@@ -240,8 +246,10 @@ app.post(`/bot${TOKEN}`, async (req: Request, res: Response) => {
       const series = await searchTMDB(text, 'tv');
       const results = [...movies, ...series];
 
+      console.log(`Search results for query "${text}":`, results);
+
       if (results.length === 0) {
-        await sendMessage(chatId, 'Ничего не найдено', replyKeyboard);
+        await sendMessage(chatId, 'Ничего не найдено. Попробуйте другое название.', replyKeyboard);
       } else {
         const replyMarkup = {
           inline_keyboard: results.slice(0, 5).map((item) => [
@@ -258,7 +266,7 @@ app.post(`/bot${TOKEN}`, async (req: Request, res: Response) => {
           resize_keyboard: true,
           persistent: true,
         };
-        await sendMessage(chatId, 'Результаты поиска:', replyMarkup);
+        await sendMessage(chatId, `Результаты поиска (${results.length}):`, replyMarkup);
       }
     }
   }
