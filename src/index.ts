@@ -78,11 +78,12 @@ async function sendMessage(chatId: number, text: string, replyMarkup: any = null
 // Функция поиска через TMDB API (по названию)
 async function searchTMDB(query: string, type: 'movie' | 'tv'): Promise<any[]> {
   try {
-    console.log(`Searching TMDB: query=${query}, type=${type}, api_key=${TMDB_API_KEY}, language=ru-RU`);
+    const encodedQuery = encodeURIComponent(query);
+    console.log(`Searching TMDB: query=${query}, encodedQuery=${encodedQuery}, type=${type}, api_key=${TMDB_API_KEY}, language=ru-RU`);
     const response = await request({
       method: 'GET',
       url: `https://api.themoviedb.org/3/search/${type}`,
-      qs: { api_key: TMDB_API_KEY, query, language: 'ru-RU' },
+      qs: { api_key: TMDB_API_KEY, query: encodedQuery, language: 'ru-RU' },
       json: true,
     });
     console.log(`TMDB response for ${type}:`, response);
@@ -91,6 +92,7 @@ async function searchTMDB(query: string, type: 'movie' | 'tv'): Promise<any[]> {
     return results;
   } catch (error: any) {
     console.error(`TMDB search error for ${type}:`, error.message);
+    await sendMessage(0, `TMDB search error for query "${query}" (${type}): ${error.message}`);
     return [];
   }
 }
@@ -247,21 +249,30 @@ app.post(`/bot${TOKEN}`, async (req: Request, res: Response) => {
       const results = [...movies, ...series];
 
       console.log(`Search results for query "${text}":`, results);
+      console.log(`Inline keyboard for query "${text}":`, results.slice(0, 5).map((item) => ({
+        title: item.title || item.name || 'Unknown',
+        media_type: item.media_type || (item.first_air_date ? 'tv' : 'movie'),
+        id: item.id,
+      })));
 
       if (results.length === 0) {
         await sendMessage(chatId, 'Ничего не найдено. Попробуйте другое название.', replyKeyboard);
       } else {
         const replyMarkup = {
-          inline_keyboard: results.slice(0, 5).map((item) => [
-            {
-              text: `Добавить: ${item.title || item.name}`,
-              callback_data: `add_${item.media_type || (item.first_air_date ? 'tv' : 'movie')}_${item.id}`,
-            },
-            {
-              text: 'Подробнее',
-              callback_data: `info_${item.media_type || (item.first_air_date ? 'tv' : 'movie')}_${item.id}`,
-            },
-          ]),
+          inline_keyboard: results.slice(0, 5).map((item) => {
+            const title = item.title || item.name || 'Без названия';
+            const mediaType = item.media_type || (item.first_air_date ? 'tv' : 'movie');
+            return [
+              {
+                text: `Добавить: ${title}`,
+                callback_data: `add_${mediaType}_${item.id}`,
+              },
+              {
+                text: 'Подробнее',
+                callback_data: `info_${mediaType}_${item.id}`,
+              },
+            ];
+          }),
           keyboard: replyKeyboard.keyboard,
           resize_keyboard: true,
           persistent: true,
